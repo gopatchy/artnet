@@ -211,7 +211,7 @@ func parsePollPacket(data []byte) (*PollPacket, error) {
 }
 
 func parsePollReplyPacket(data []byte) (*PollReplyPacket, error) {
-	if len(data) < 207 {
+	if len(data) < 214 {
 		return nil, ErrPacketTooShort
 	}
 
