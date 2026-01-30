@@ -29,28 +29,33 @@ type Discovery struct {
 	longName      string
 	inputUnivs    []Universe
 	outputUnivs   []Universe
-	pollTargets   []*net.UDPAddr
 	done          chan struct{}
 	onChange      func(*Node)
 	lastPollHeard time.Time
 	pollMu        sync.Mutex
 }
 
-func NewDiscovery(sender *Sender, shortName, longName string, inputUnivs, outputUnivs []Universe, pollTargets []*net.UDPAddr) *Discovery {
-	return &Discovery{
+func NewDiscovery(sender *Sender, localIP, broadcast net.IP, localMAC net.HardwareAddr, shortName, longName string, inputUnivs, outputUnivs []Universe) *Discovery {
+	d := &Discovery{
 		sender:      sender,
 		nodes:       map[string]*Node{},
+		broadcast:   broadcast,
 		shortName:   shortName,
 		longName:    longName,
 		inputUnivs:  inputUnivs,
 		outputUnivs: outputUnivs,
-		pollTargets: pollTargets,
 		done:        make(chan struct{}),
 	}
+	if ip4 := localIP.To4(); ip4 != nil {
+		copy(d.localIP[:], ip4)
+	}
+	if len(localMAC) == 6 {
+		copy(d.localMAC[:], localMAC)
+	}
+	return d
 }
 
 func (d *Discovery) Start() {
-	d.detectInterface()
 	go d.pollLoop()
 }
 
@@ -89,16 +94,12 @@ func (d *Discovery) pollLoop() {
 
 func (d *Discovery) sendPolls() {
 	d.pollMu.Lock()
-	lastHeard := d.lastPollHeard
-	d.pollMu.Unlock()
+	defer d.pollMu.Unlock()
 
-	if time.Since(lastHeard) < 15*time.Second {
+	if time.Since(d.lastPollHeard) < 15*time.Second {
 		return
 	}
-
-	for _, target := range d.pollTargets {
-		d.sender.SendPoll(target)
-	}
+	d.sender.SendPoll(&net.UDPAddr{IP: d.broadcast, Port: Port})
 }
 
 func (d *Discovery) cleanup() {
@@ -155,12 +156,9 @@ func (d *Discovery) HandlePollReply(src *net.UDPAddr, pkt *PollReplyPacket) {
 }
 
 func (d *Discovery) HandlePoll(src *net.UDPAddr) {
-	localIP := net.IP(d.localIP[:])
-	if !src.IP.Equal(localIP) {
-		d.pollMu.Lock()
-		d.lastPollHeard = time.Now()
-		d.pollMu.Unlock()
-	}
+	d.pollMu.Lock()
+	d.lastPollHeard = time.Now()
+	d.pollMu.Unlock()
 
 	if d.receiver == nil {
 		return
@@ -215,57 +213,6 @@ func (d *Discovery) GetAllNodes() []*Node {
 		result = append(result, node)
 	}
 	return result
-}
-
-func (d *Discovery) SetLocalIP(ip net.IP) {
-	if ip4 := ip.To4(); ip4 != nil {
-		copy(d.localIP[:], ip4)
-	}
-}
-
-func (d *Discovery) detectInterface() {
-	d.broadcast = net.IPv4bcast
-
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return
-	}
-
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagLoopback != 0 || iface.Flags&net.FlagUp == 0 {
-			continue
-		}
-
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-
-		for _, addr := range addrs {
-			ipnet, ok := addr.(*net.IPNet)
-			if !ok {
-				continue
-			}
-
-			ip4 := ipnet.IP.To4()
-			if ip4 == nil {
-				continue
-			}
-
-			copy(d.localIP[:], ip4)
-
-			if len(iface.HardwareAddr) == 6 {
-				copy(d.localMAC[:], iface.HardwareAddr)
-			}
-
-			bcast := make(net.IP, 4)
-			for i := 0; i < 4; i++ {
-				bcast[i] = ip4[i] | ^ipnet.Mask[i]
-			}
-			d.broadcast = bcast
-			return
-		}
-	}
 }
 
 func containsUniverse(slice []Universe, val Universe) bool {

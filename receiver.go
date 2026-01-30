@@ -1,7 +1,9 @@
 package artnet
 
 import (
+	"context"
 	"net"
+	"syscall"
 	"time"
 )
 
@@ -32,6 +34,29 @@ func NewReceiver(addr *net.UDPAddr, handler Handler) (*Receiver, error) {
 
 func NewDefaultReceiver(handler Handler) (*Receiver, error) {
 	return NewReceiver(&net.UDPAddr{Port: Port}, handler)
+}
+
+func NewInterfaceReceiver(ifaceName string, handler Handler) (*Receiver, error) {
+	lc := net.ListenConfig{
+		Control: func(network, address string, c syscall.RawConn) error {
+			var err error
+			c.Control(func(fd uintptr) {
+				err = syscall.SetsockoptString(int(fd), syscall.SOL_SOCKET, syscall.SO_BINDTODEVICE, ifaceName)
+			})
+			return err
+		},
+	}
+
+	conn, err := lc.ListenPacket(context.Background(), "udp4", ":6454")
+	if err != nil {
+		return nil, err
+	}
+
+	return &Receiver{
+		conn:    conn.(*net.UDPConn),
+		handler: handler,
+		done:    make(chan struct{}),
+	}, nil
 }
 
 func (r *Receiver) Start() {

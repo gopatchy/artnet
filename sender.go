@@ -1,8 +1,10 @@
 package artnet
 
 import (
+	"context"
 	"net"
 	"sync"
+	"syscall"
 )
 
 type Sender struct {
@@ -28,6 +30,28 @@ func NewSenderFromConn(conn *net.UDPConn) *Sender {
 		conn:      conn,
 		sequences: map[Universe]uint8{},
 	}
+}
+
+func NewInterfaceSender(ifaceName string) (*Sender, error) {
+	lc := net.ListenConfig{
+		Control: func(network, address string, c syscall.RawConn) error {
+			var err error
+			c.Control(func(fd uintptr) {
+				err = syscall.SetsockoptString(int(fd), syscall.SOL_SOCKET, syscall.SO_BINDTODEVICE, ifaceName)
+			})
+			return err
+		},
+	}
+
+	conn, err := lc.ListenPacket(context.Background(), "udp4", ":0")
+	if err != nil {
+		return nil, err
+	}
+
+	return &Sender{
+		conn:      conn.(*net.UDPConn),
+		sequences: map[Universe]uint8{},
+	}, nil
 }
 
 func (s *Sender) SendDMX(addr *net.UDPAddr, universe Universe, data []byte) error {
