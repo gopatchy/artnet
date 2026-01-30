@@ -18,20 +18,22 @@ type Node struct {
 }
 
 type Discovery struct {
-	sender       *Sender
-	receiver     *Receiver
-	nodes        map[string]*Node
-	nodesMu      sync.RWMutex
-	localIP      [4]byte
-	localMAC     [6]byte
-	broadcast    net.IP
-	shortName    string
-	longName     string
-	inputUnivs   []Universe
-	outputUnivs  []Universe
-	pollTargets  []*net.UDPAddr
-	done         chan struct{}
-	onChange     func(*Node)
+	sender        *Sender
+	receiver      *Receiver
+	nodes         map[string]*Node
+	nodesMu       sync.RWMutex
+	localIP       [4]byte
+	localMAC      [6]byte
+	broadcast     net.IP
+	shortName     string
+	longName      string
+	inputUnivs    []Universe
+	outputUnivs   []Universe
+	pollTargets   []*net.UDPAddr
+	done          chan struct{}
+	onChange      func(*Node)
+	lastPollHeard time.Time
+	pollMu        sync.Mutex
 }
 
 func NewDiscovery(sender *Sender, shortName, longName string, inputUnivs, outputUnivs []Universe, pollTargets []*net.UDPAddr) *Discovery {
@@ -86,6 +88,14 @@ func (d *Discovery) pollLoop() {
 }
 
 func (d *Discovery) sendPolls() {
+	d.pollMu.Lock()
+	lastHeard := d.lastPollHeard
+	d.pollMu.Unlock()
+
+	if time.Since(lastHeard) < 15*time.Second {
+		return
+	}
+
 	for _, target := range d.pollTargets {
 		d.sender.SendPoll(target)
 	}
@@ -145,6 +155,13 @@ func (d *Discovery) HandlePollReply(src *net.UDPAddr, pkt *PollReplyPacket) {
 }
 
 func (d *Discovery) HandlePoll(src *net.UDPAddr) {
+	localIP := net.IP(d.localIP[:])
+	if !src.IP.Equal(localIP) {
+		d.pollMu.Lock()
+		d.lastPollHeard = time.Now()
+		d.pollMu.Unlock()
+	}
+
 	if d.receiver == nil {
 		return
 	}
