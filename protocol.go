@@ -13,24 +13,21 @@ const (
 	Port            = 6454
 	ProtocolVersion = 14
 
-	OpPoll       uint16 = 0x2000
-	OpPollReply  uint16 = 0x2100
-	OpDmx        uint16 = 0x5000
-	OpSync       uint16 = 0x5200
-	OpAddress    uint16 = 0x6000
-	OpInput      uint16 = 0x7000
-	OpTodRequest uint16 = 0x8000
-	OpTodData    uint16 = 0x8100
+	OpPoll      uint16 = 0x2000
+	OpPollReply uint16 = 0x2100
+	OpDmx       uint16 = 0x5000
+	OpSync      uint16 = 0x5200
+	OpAddress   uint16 = 0x6000
+	OpInput     uint16 = 0x7000
+	OpTodData   uint16 = 0x8100
 	OpTodControl uint16 = 0x8200
-	OpRdm        uint16 = 0x8300
+	OpRdm       uint16 = 0x8300
 
 	PortTypeOutput uint8 = 0x80
 	PortTypeInput  uint8 = 0x40
 
 	GoodOutputDataTransmitted uint8 = 0x80
 	GoodInputDataReceived     uint8 = 0x80
-
-	TodCommandFull uint8 = 0x00
 
 	StyleNode       uint8 = 0x00
 	StyleController uint8 = 0x01
@@ -151,33 +148,6 @@ func (p *PollReplyPacket) OutputUniverses() []Universe {
 	return result
 }
 
-type RDMUID [6]byte
-
-func (u RDMUID) Manufacturer() uint16 {
-	return uint16(u[0])<<8 | uint16(u[1])
-}
-
-func (u RDMUID) Device() uint32 {
-	return uint32(u[2])<<24 | uint32(u[3])<<16 | uint32(u[4])<<8 | uint32(u[5])
-}
-
-func (u RDMUID) String() string {
-	return fmt.Sprintf("%04x:%08x", u.Manufacturer(), u.Device())
-}
-
-type TodDataPacket struct {
-	RdmVer      uint8
-	Port        uint8
-	BindIndex   uint8
-	Net         uint8
-	Command     uint8
-	Universe    Universe
-	UidTotal    uint16
-	BlockCount  uint8
-	UidCount    uint8
-	UIDs        []RDMUID
-}
-
 func ParsePacket(data []byte) (uint16, interface{}, error) {
 	if len(data) < 10 {
 		return 0, nil, ErrPacketTooShort
@@ -198,9 +168,6 @@ func ParsePacket(data []byte) (uint16, interface{}, error) {
 		return opCode, pkt, err
 	case OpPollReply:
 		pkt, err := parsePollReplyPacket(data)
-		return opCode, pkt, err
-	case OpTodData:
-		pkt, err := parseTodDataPacket(data)
 		return opCode, pkt, err
 	default:
 		return opCode, nil, nil
@@ -309,53 +276,6 @@ func BuildPollPacket() []byte {
 	binary.BigEndian.PutUint16(buf[10:12], ProtocolVersion)
 	buf[12] = 0x00
 	buf[13] = 0x00
-	return buf
-}
-
-func parseTodDataPacket(data []byte) (*TodDataPacket, error) {
-	if len(data) < 28 {
-		return nil, ErrPacketTooShort
-	}
-
-	pkt := &TodDataPacket{
-		RdmVer:     data[10],
-		Port:       data[11],
-		BindIndex:  data[20],
-		Net:        data[21],
-		Command:    data[22],
-		Universe:   NewUniverse(data[21], data[23]>>4, data[23]&0x0F),
-		UidTotal:   binary.BigEndian.Uint16(data[24:26]),
-		BlockCount: data[26],
-		UidCount:   data[27],
-	}
-
-	uidCount := int(pkt.UidCount)
-	if uidCount > 200 {
-		uidCount = 200
-	}
-
-	expectedLen := 28 + uidCount*6
-	if len(data) < expectedLen {
-		uidCount = (len(data) - 28) / 6
-	}
-
-	pkt.UIDs = make([]RDMUID, uidCount)
-	for i := 0; i < uidCount; i++ {
-		copy(pkt.UIDs[i][:], data[28+i*6:28+i*6+6])
-	}
-
-	return pkt, nil
-}
-
-func BuildTodRequestPacket(net, subnet, universe uint8) []byte {
-	buf := make([]byte, 25)
-	copy(buf[0:8], ID[:])
-	binary.LittleEndian.PutUint16(buf[8:10], OpTodRequest)
-	binary.BigEndian.PutUint16(buf[10:12], ProtocolVersion)
-	buf[20] = net
-	buf[21] = TodCommandFull
-	buf[22] = 1
-	buf[23] = subnet<<4 | (universe & 0x0F)
 	return buf
 }
 
