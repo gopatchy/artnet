@@ -13,6 +13,10 @@ type Handler interface {
 	HandlePollReply(src *net.UDPAddr, pkt *PollReplyPacket)
 }
 
+type TodDataHandler interface {
+	HandleTodData(src *net.UDPAddr, pkt *TodDataPacket)
+}
+
 type Receiver struct {
 	conn    *net.UDPConn
 	handler Handler
@@ -127,6 +131,12 @@ func (r *Receiver) handle(src *net.UDPAddr, data []byte) {
 	case OpPollReply:
 		if reply, ok := pkt.(*PollReplyPacket); ok {
 			r.handler.HandlePollReply(src, reply)
+		}
+	case OpTodData:
+		if todHandler, ok := r.handler.(TodDataHandler); ok {
+			if tod, ok := pkt.(*TodDataPacket); ok {
+				todHandler.HandleTodData(src, tod)
+			}
 		}
 	}
 }

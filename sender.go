@@ -81,6 +81,12 @@ func (s *Sender) SendPollReply(addr *net.UDPAddr, localIP [4]byte, localMAC [6]b
 	return err
 }
 
+func (s *Sender) SendTodRequest(addr *net.UDPAddr, universe Universe) error {
+	pkt := BuildTodRequestPacket(universe.Net(), universe.SubNet(), universe.Universe())
+	_, err := s.conn.WriteToUDP(pkt, addr)
+	return err
+}
+
 func (s *Sender) SendRaw(addr *net.UDPAddr, data []byte) error {
 	_, err := s.conn.WriteToUDP(data, addr)
 	return err

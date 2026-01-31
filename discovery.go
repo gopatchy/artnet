@@ -14,6 +14,7 @@ type Node struct {
 	LongName    string
 	Inputs      []Universe
 	Outputs     []Universe
+	RDMUIDs     map[Universe][]RDMUID
 	LastSeen    time.Time
 }
 
@@ -128,8 +129,9 @@ func (d *Discovery) HandlePollReply(src *net.UDPAddr, pkt *PollReplyPacket) {
 	node, exists := d.nodes[ip]
 	if !exists {
 		node = &Node{
-			IP:   src.IP,
-			Port: pkt.Port,
+			IP:      src.IP,
+			Port:    pkt.Port,
+			RDMUIDs: map[Universe][]RDMUID{},
 		}
 		d.nodes[ip] = node
 	}
@@ -139,6 +141,7 @@ func (d *Discovery) HandlePollReply(src *net.UDPAddr, pkt *PollReplyPacket) {
 	node.MAC = pkt.MACAddr()
 	node.LastSeen = time.Now()
 
+	var newOutputs []Universe
 	for _, u := range pkt.InputUniverses() {
 		if !containsUniverse(node.Inputs, u) {
 			node.Inputs = append(node.Inputs, u)
@@ -147,8 +150,41 @@ func (d *Discovery) HandlePollReply(src *net.UDPAddr, pkt *PollReplyPacket) {
 	for _, u := range pkt.OutputUniverses() {
 		if !containsUniverse(node.Outputs, u) {
 			node.Outputs = append(node.Outputs, u)
+			newOutputs = append(newOutputs, u)
 		}
 	}
+
+	if d.onChange != nil {
+		d.onChange(node)
+	}
+
+	if len(newOutputs) > 0 {
+		go d.requestTod(src, newOutputs)
+	}
+}
+
+func (d *Discovery) requestTod(addr *net.UDPAddr, universes []Universe) {
+	for _, u := range universes {
+		d.sender.SendTodRequest(addr, u)
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func (d *Discovery) HandleTodData(src *net.UDPAddr, pkt *TodDataPacket) {
+	d.nodesMu.Lock()
+	defer d.nodesMu.Unlock()
+
+	ip := src.IP.String()
+	node, exists := d.nodes[ip]
+	if !exists {
+		return
+	}
+
+	if node.RDMUIDs == nil {
+		node.RDMUIDs = map[Universe][]RDMUID{}
+	}
+
+	node.RDMUIDs[pkt.Universe] = pkt.UIDs
 
 	if d.onChange != nil {
 		d.onChange(node)
