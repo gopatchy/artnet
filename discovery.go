@@ -2,6 +2,7 @@ package artnet
 
 import (
 	"net"
+	"sort"
 	"sync"
 	"time"
 )
@@ -175,7 +176,15 @@ func (d *Discovery) sendPollReplies(dst *net.UDPAddr, universes []Universe, isIn
 		groups[key] = append(groups[key], u)
 	}
 
-	for _, univs := range groups {
+	keys := make([]uint16, 0, len(groups))
+	for k := range groups {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+
+	for _, key := range keys {
+		univs := groups[key]
+		sort.Slice(univs, func(i, j int) bool { return univs[i] < univs[j] })
 		for i := 0; i < len(univs); i += 4 {
 			end := i + 4
 			if end > len(univs) {
@@ -184,6 +193,7 @@ func (d *Discovery) sendPollReplies(dst *net.UDPAddr, universes []Universe, isIn
 			chunk := univs[i:end]
 			pkt := BuildPollReplyPacket(d.localIP, d.localMAC, d.shortName, d.longName, chunk, isInput)
 			d.receiver.SendTo(pkt, dst)
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
 }
